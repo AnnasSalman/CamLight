@@ -84,6 +84,15 @@
     </div>
     <div class="look" id="whiteStatus"></div>
 
+    <h2>TV test patterns</h2>
+    <div class="look" id="tvStatus"></div>
+    <div class="look" id="tvUrl"></div>
+    <div class="row">
+      <button id="calTv" class="primary">Calibrate black + white with the TV page</button>
+    </div>
+    <div class="row" id="patterns"></div>
+    <div class="look" id="calTvStatus"></div>
+
     <h2>Camera</h2>
     <div class="row" id="fpsRow">
       <button class="chip" data-fps="30">30 fps</button>
@@ -168,6 +177,22 @@
     const lk = s.looks.find(l => l.id === s.look); $('lookDesc').textContent = lk ? lk.name + ': ' + lk.desc : '';
     $('whiteStatus').textContent = s.whiteStatus || (s.hasWhite ? 'White calibration saved.' : 'Show a plain white screen on the TV (room lights as usual), then tap Calibrate white.');
     $('clearWhite').style.display = s.hasWhite ? '' : 'none';
+    const tv = s.tvPage || {};
+    $('tvStatus').textContent = tv.connected
+      ? 'TV page: connected (' + tv.w + '×' + tv.h + (tv.fs ? ', full screen' : ', NOT full screen: press OK on the TV') + ')' + (tv.ua ? ' · ' + tv.ua : '')
+      : 'TV page: not open.';
+    $('tvUrl').textContent = tv.connected ? '' : 'Open this in the TV browser: ' + (s.patternsUrl || '(address not available)');
+    const pat = $('patterns');
+    if (pat.children.length !== s.patterns.length + 1) {
+      pat.innerHTML = '';
+      s.patterns.concat([{id:'none', label:'Off'}]).forEach(p => {
+        const b = document.createElement('button'); b.className = 'chip'; b.dataset.id = p.id; b.textContent = p.label;
+        b.onclick = () => post({a:'pattern', id:p.id}); pat.appendChild(b);
+      });
+    }
+    [...pat.children].forEach(b => { b.classList.toggle('on', b.dataset.id === s.pattern); b.disabled = !tv.connected && b.dataset.id !== 'none'; });
+    $('calTv').disabled = !tv.connected || s.detecting;
+    $('calTvStatus').textContent = [s.blackStatus, s.whiteStatus].filter(Boolean).join('  ·  ');
     [...$('fpsRow').children].forEach(b => { b.classList.toggle('on', +b.dataset.fps === s.cameraFps); b.disabled = s.detecting; });
     $('fpsNote').textContent = (s.fpsActual && s.fpsActual !== s.cameraFps) ? s.cameraFps + ' fps is not available here; running at ' + s.fpsActual + ' fps.' : '';
     setRange('brightness', s.brightness, undefined, undefined, v => Math.round(v * 100) + '%');
@@ -191,6 +216,7 @@
   [...$('fpsRow').children].forEach(b => b.onclick = () => post({a:'cameraFps', v:+b.dataset.fps}));
   $('calBlack').onclick = () => post({a:'calibrateBlack'});
   $('calWhite').onclick = () => post({a:'calibrateWhite'});
+  $('calTv').onclick = () => post({a:'calibrateTv'});
   $('clearWhite').onclick = () => post({a:'clearWhite'});
   $('lock').onclick = () => post({a:'lock', on: !(S && S.lock)});
   $('zebra').onclick = () => post({a:'zebra', on: !(S && S.showZebra)});

@@ -40,6 +40,14 @@ class ConfigStore(context: Context) {
             k
         }
 
+    /** 4-digit code that opens only the TV test page; created once. */
+    val patternCode: String
+        get() = prefs.getString("patternCode", null) ?: run {
+            val c = (1000 + java.security.SecureRandom().nextInt(9000)).toString()
+            prefs.edit().putString("patternCode", c).apply()
+            c
+        }
+
     /** WLED color gamma before CamLight changed it (0 = we have not changed it). */
     var originalGamma: Float
         get() = prefs.getFloat("originalGamma", 0f)

@@ -22,6 +22,7 @@ import com.camlight.app.camera.Zebra
 import com.camlight.app.data.CameraSettings
 import com.camlight.app.data.ConfigStore
 import com.camlight.app.model.StripConfig
+import com.camlight.app.remote.Pattern
 import com.camlight.app.remote.RemoteApi
 import com.camlight.app.remote.RemoteServer
 import com.camlight.app.wled.DdpSender
@@ -38,6 +39,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlin.math.pow
+
+/** What the TV test page last reported about itself (size, full screen, browser). */
+class TvPage(val width: Int, val height: Int, val fullscreen: Boolean, val agent: String, val seenAtMs: Long)
 
 /** The live image and zebra, kept out of [CameraUiState] so only the preview redraws at 10 Hz. */
 class PreviewFrame(val bitmap: Bitmap?, val version: Int, val zebra: Zebra?)
@@ -78,6 +82,9 @@ data class CameraUiState(
     val grayTest: Boolean = false,
     /** Address of the remote control page while the camera screen is open. */
     val remoteUrl: String? = null,
+    /** Address (short code) to open in the TV's browser, and the pattern it is asked to show. */
+    val patternsUrl: String? = null,
+    val pattern: String = Pattern.NONE,
     val error: String? = null,
 )
 
@@ -313,7 +320,11 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
         if (_state.value.detecting) return
         setGrayTest(false)
         setLights(false)
-        viewModelScope.launch {
+        viewModelScope.launch { measureBlack() }
+    }
+
+    private suspend fun measureBlack() {
+        run {
             _state.update { it.copy(blackStatus = "Measuring black… keep the TV off or fully black.") }
             processor.beginCapture(60, 1.1)
             val deadline = System.currentTimeMillis() + 8000
@@ -342,7 +353,11 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
         if (_state.value.detecting) return
         setGrayTest(false)
         setLights(false)
-        viewModelScope.launch {
+        viewModelScope.launch { measureWhite() }
+    }
+
+    private suspend fun measureWhite() {
+        run {
             _state.update { it.copy(whiteStatus = "Measuring white… keep the TV on a plain white screen.") }
             processor.beginCapture(60, 1.0)
             val deadline = System.currentTimeMillis() + 8000
@@ -350,13 +365,13 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
             val r = processor.captureResult
             if (r == null) {
                 _state.update { it.copy(whiteStatus = "No camera frames, is the camera running?") }
-                return@launch
+                return@run
             }
             if (r.max() > 0.92f) {
                 _state.update {
                     it.copy(whiteStatus = "The white screen is over-exposed (a channel reads %.0f%%). Lower the exposure until the zebra is empty, then try again.".format(r.max() * 100))
                 }
-                return@launch
+                return@run
             }
             val black = processor.blackInUse
             val c = FloatArray(3) { (r[it] - black[it]).coerceAtLeast(0f) }
@@ -364,7 +379,7 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
                 _state.update {
                     it.copy(whiteStatus = "That does not look like a bright white screen (reads %.0f%%). Show a plain white image, or raise the camera exposure.".format(r[1] * 100))
                 }
-                return@launch
+                return@run
             }
             val gains = floatArrayOf(
                 (c[1] / c[0].coerceAtLeast(1e-4f)).coerceIn(0.4f, 2.5f),
@@ -624,10 +639,14 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
     private var debugSrc: Bitmap? = null
     private var debugJpeg: ByteArray? = null
 
+    @Volatile private var tvPage: TvPage? = null
+
     private fun startRemote() {
         if (remote != null) return
         val page = runCatching { app.assets.open("remote.html").use { it.readBytes() } }.getOrNull() ?: return
-        val server = RemoteServer(remoteApi, store.remoteKey, page)
+        val tvHtml = runCatching { app.assets.open("patterns.html").use { it.readBytes() } }.getOrDefault(ByteArray(0))
+        val code = store.patternCode
+        val server = RemoteServer(remoteApi, store.remoteKey, page, tvHtml, code)
         val port = server.start() ?: run {
             _state.update { it.copy(error = "Could not start the remote page (no free port).") }
             return
@@ -635,14 +654,48 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
         remote = server
         val ip = RemoteServer.localIp()
         val url = ip?.let { "http://$it:$port/?k=${store.remoteKey}" }
-        _state.update { it.copy(remoteUrl = url) }
-        Log.i(TAG, "remote page: $url")
+        val tvUrl = ip?.let { "http://$it:$port/p/$code" }
+        _state.update { it.copy(remoteUrl = url, patternsUrl = tvUrl) }
+        Log.i(TAG, "remote page: $url  tv test page: $tvUrl")
     }
 
     private fun stopRemote() {
         remote?.stop()
         remote = null
-        _state.update { it.copy(remoteUrl = null) }
+        tvPage = null
+        _state.update { it.copy(remoteUrl = null, patternsUrl = null, pattern = Pattern.NONE) }
+    }
+
+    private fun tvPageConnected() = tvPage?.let { System.currentTimeMillis() - it.seenAtMs < TV_PAGE_TIMEOUT_MS } == true
+
+    fun setPattern(id: String) {
+        val valid = if (id == Pattern.NONE || Pattern.byId(id) != null) id else Pattern.NONE
+        _state.update { it.copy(pattern = valid) }
+    }
+
+    /**
+     * Black then white on the TV's own test page, measured with the existing black and white procedures.
+     * Needs the TV page to be open (it reports in every 300 ms).
+     */
+    fun calibrateWithTvPage() {
+        if (_state.value.detecting) return
+        if (!tvPageConnected()) {
+            _state.update { it.copy(blackStatus = "The TV test page is not open. Open ${it.patternsUrl ?: "the TV test page address"} in the TV's browser first.") }
+            return
+        }
+        setGrayTest(false)
+        setLights(false)
+        viewModelScope.launch {
+            setPattern("black")
+            _state.update { it.copy(blackStatus = "Black pattern on the TV…") }
+            delay(PATTERN_SETTLE_MS)
+            measureBlack()
+            setPattern("white")
+            _state.update { it.copy(whiteStatus = "White pattern on the TV…") }
+            delay(PATTERN_SETTLE_MS)
+            measureWhite()
+            setPattern(Pattern.NONE)
+        }
     }
 
     private fun jpeg(bmp: Bitmap): ByteArray {
@@ -667,6 +720,25 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
 
         override fun state(): String = remoteState()
 
+        override fun pattern(info: Map<String, String>): String {
+            tvPage = TvPage(
+                width = info["w"]?.toIntOrNull() ?: 0,
+                height = info["h"]?.toIntOrNull() ?: 0,
+                fullscreen = info["fs"] == "1",
+                agent = (info["ua"] ?: "").take(120),
+                seenAtMs = System.currentTimeMillis(),
+            )
+            val id = _state.value.pattern
+            val p = Pattern.byId(id)
+            val o = org.json.JSONObject()
+            if (p == null) {
+                o.put("id", Pattern.NONE)
+            } else {
+                o.put("id", p.id).put("label", p.label).put("rgb", p.rgb).put("style", p.style)
+            }
+            return o.toString()
+        }
+
         override fun command(json: String): String = remoteCommand(json)
     }
 
@@ -690,6 +762,13 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
         o.put("look", s.look).put("smoothing", s.smoothing.name)
         o.put("whiteStatus", s.whiteStatus ?: org.json.JSONObject.NULL).put("hasWhite", s.white != null)
         o.put("cameraFps", s.cameraFps).put("fpsActual", sel?.fps ?: 0).put("has60", sel?.has60 ?: false)
+        o.put("pattern", s.pattern).put("patternsUrl", s.patternsUrl ?: org.json.JSONObject.NULL)
+        o.put("patterns", org.json.JSONArray().also { a -> Pattern.ALL.forEach { a.put(org.json.JSONObject().put("id", it.id).put("label", it.label)) } })
+        val tv = tvPage
+        o.put("tvPage", org.json.JSONObject()
+            .put("connected", tvPageConnected())
+            .put("w", tv?.width ?: 0).put("h", tv?.height ?: 0)
+            .put("fs", tv?.fullscreen ?: false).put("ua", tv?.agent ?: ""))
         o.put("brightness", s.brightness.toDouble()).put("saturation", s.saturation.toDouble()).put("warmth", s.warmth.toDouble())
         o.put("zoom", s.params.zoom.toDouble()).put("zoomMin", (sel?.minZoom ?: 1f).toDouble()).put("zoomMax", (sel?.maxZoom ?: 1f).toDouble())
         o.put("ev", s.params.ev).put("evMin", sel?.evMin ?: 0).put("evMax", sel?.evMax ?: 0).put("evStep", (sel?.evStep ?: 1f).toDouble())
@@ -721,6 +800,8 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
                 "lights" -> setLights(c.getBoolean("on"))
                 "look" -> setLook(c.getString("id"))
                 "cameraFps" -> setCameraFps(c.getInt("v"))
+                "pattern" -> setPattern(c.getString("id"))
+                "calibrateTv" -> calibrateWithTvPage()
                 "calibrateWhite" -> calibrateWhite()
                 "clearWhite" -> clearWhite()
                 "smoothing" -> Smoothing.entries.firstOrNull { it.name == c.getString("name") }?.let(::setSmoothing)
@@ -883,6 +964,8 @@ class CameraViewModel(private val app: Application) : AndroidViewModel(app) {
     private companion object {
         const val TAG = "CamLight"
         const val MIN_WHITE_LEVEL = 0.05f
+        const val PATTERN_SETTLE_MS = 1800L
+        const val TV_PAGE_TIMEOUT_MS = 2000L
         const val SEND_INTERVAL_MS = 33L
         const val KEEPALIVE_NS = 400_000_000L
         const val DETECT_LINEAR = 0.4f

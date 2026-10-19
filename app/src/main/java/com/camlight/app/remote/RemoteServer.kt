@@ -14,6 +14,10 @@ interface RemoteApi {
     /** Latest preview as JPEG (null if none yet). */
     fun frame(debug: Boolean): ByteArray?
     fun state(): String
+
+    /** The pattern the TV page should show now (JSON). [info] carries what the TV page reports about itself. */
+    fun pattern(info: Map<String, String>): String
+
     /** Applies one JSON command and returns a JSON reply. */
     fun command(json: String): String
 }
@@ -26,6 +30,10 @@ class RemoteServer(
     private val api: RemoteApi,
     private val key: String,
     private val page: ByteArray,
+    /** Page shown full screen on the TV (served at /p/<code>). */
+    private val patternsPage: ByteArray = ByteArray(0),
+    /** Short code (digits) that only opens the TV page and its pattern feed. */
+    private val code: String = "",
 ) {
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(6) { r -> Thread(r, "camlight-remote").apply { isDaemon = true } }
@@ -83,7 +91,20 @@ class RemoteServer(
                 val path = rawPath.substringBefore('?')
                 val query = rawPath.substringAfter('?', "").split('&').filter { it.contains('=') }
                     .associate { URLDecoder.decode(it.substringBefore('='), "UTF-8") to URLDecoder.decode(it.substringAfter('='), "UTF-8") }
-                if (query["k"] != key) { respond(sock, 403, "text/plain", "forbidden".toByteArray()); return }
+                val keyOk = query["k"] == key
+
+                // The TV test page and its pattern feed accept the short code (nothing else does).
+                if (method == "GET" && path.startsWith("/p/")) {
+                    if (path.removePrefix("/p/").trimEnd('/') == code) respond(sock, 200, "text/html; charset=utf-8", patternsPage)
+                    else respond(sock, 403, "text/plain", "forbidden".toByteArray())
+                    return
+                }
+                if (method == "GET" && path == "/pattern") {
+                    if (keyOk || query["c"] == code) respond(sock, 200, "application/json", api.pattern(query).toByteArray())
+                    else respond(sock, 403, "text/plain", "forbidden".toByteArray())
+                    return
+                }
+                if (!keyOk) { respond(sock, 403, "text/plain", "forbidden".toByteArray()); return }
 
                 when {
                     method == "GET" && path == "/" -> respond(sock, 200, "text/html; charset=utf-8", page)

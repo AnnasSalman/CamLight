@@ -1,5 +1,6 @@
 package com.camlight.app
 
+import com.camlight.app.remote.Pattern
 import com.camlight.app.remote.RemoteApi
 import com.camlight.app.remote.RemoteServer
 import org.junit.After
@@ -12,9 +13,14 @@ import java.net.URL
 
 class RemoteServerTest {
     private val received = mutableListOf<String>()
+    private var lastPatternInfo: Map<String, String> = emptyMap()
     private val api = object : RemoteApi {
         override fun frame(debug: Boolean): ByteArray? = if (debug) null else byteArrayOf(1, 2, 3)
         override fun state(): String = """{"ok":true}"""
+        override fun pattern(info: Map<String, String>): String {
+            lastPatternInfo = info
+            return """{"id":"white"}"""
+        }
         override fun command(json: String): String { received += json; return """{"ok":true}""" }
     }
     private lateinit var server: RemoteServer
@@ -22,7 +28,7 @@ class RemoteServerTest {
 
     @Before
     fun start() {
-        server = RemoteServer(api, "secret12", "<html>page</html>".toByteArray())
+        server = RemoteServer(api, "secret12", "<html>page</html>".toByteArray(), "<html>tv</html>".toByteArray(), "4821")
         port = server.start(18080)!!
     }
 
@@ -63,6 +69,43 @@ class RemoteServerTest {
         assertEquals(200, c.responseCode)
         assertEquals("""{"ok":true}""", String(c.inputStream.readBytes()))
         assertEquals(listOf("""{"a":"detect"}"""), received)
+    }
+
+    @Test
+    fun tvPageOpensWithTheShortCodeOnly() {
+        val ok = get("/p/4821")
+        assertEquals(200, ok.first)
+        assertTrue(String(ok.second).contains("tv"))
+        assertEquals(200, get("/p/4821/").first)
+        assertEquals(403, get("/p/0000").first)
+        assertEquals(403, get("/p/secret12").first)
+    }
+
+    @Test
+    fun patternFeedAcceptsTheCodeOrTheKeyAndPassesPageInfo() {
+        assertEquals("""{"id":"white"}""", String(get("/pattern?c=4821&w=1920&h=1080&fs=1&ua=Chrome").second))
+        assertEquals("1920", lastPatternInfo["w"])
+        assertEquals("1", lastPatternInfo["fs"])
+        assertEquals(200, get("/pattern?k=secret12").first)
+        assertEquals(403, get("/pattern?c=1111").first)
+        assertEquals(403, get("/pattern").first)
+    }
+
+    @Test
+    fun theShortCodeDoesNotUnlockAnythingElse() {
+        assertEquals(403, get("/state?c=4821").first)
+        assertEquals(403, get("/frame.jpg?c=4821").first)
+        assertEquals(403, get("/?c=4821").first)
+    }
+
+    @Test
+    fun patternsHaveUniqueIdsAndExactValues() {
+        assertEquals(Pattern.ALL.size, Pattern.ALL.map { it.id }.toSet().size)
+        assertEquals(0x000000, Pattern.byId("black")!!.rgb)
+        assertEquals(0xFFFFFF, Pattern.byId("white")!!.rgb)
+        assertEquals(0x808080, Pattern.byId("gray50")!!.rgb)
+        assertEquals("edges", Pattern.byId("edges")!!.style)
+        assertEquals(null, Pattern.byId("nope"))
     }
 
     @Test

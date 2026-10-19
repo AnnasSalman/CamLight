@@ -155,6 +155,10 @@ private fun CameraContent(state: CameraUiState, vm: CameraViewModel, onClose: ()
                 Text(url, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                 val qr = remember(url) { qrBitmap(url).asImageBitmap() }
                 Image(qr, contentDescription = "QR code for the remote page", modifier = Modifier.size(150.dp))
+                state.patternsUrl?.let { tv ->
+                    Text("TV test page (open this in the TV's browser for calibration patterns):", style = MaterialTheme.typography.bodySmall)
+                    Text(tv, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
             }
 
             Button(
