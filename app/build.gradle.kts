@@ -16,6 +16,20 @@ android {
         versionName = "0.1.0"
     }
 
+    // CI points CAMLIGHT_DEBUG_KEYSTORE at the project's debug key so its APKs are signed like local ones and can
+    // update each other. Unset (the normal local case), Gradle keeps using the machine's default debug key.
+    signingConfigs {
+        getByName("debug") {
+            val shared = System.getenv("CAMLIGHT_DEBUG_KEYSTORE")?.let(::File)
+            if (shared != null && shared.exists()) {
+                storeFile = shared
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
