@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CamLight Remote</title>
+<style>
+  :root { --bg:#14131a; --panel:#1e1d26; --line:#34323f; --text:#ece9f4; --dim:#a29fb2; --acc:#cbb8ff; --good:#3ddc84; --bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui, sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  #conn { font-size:13px; color:var(--dim); }
+  #conn.ok { color:var(--good); } #conn.bad { color:var(--bad); }
+  main { display:grid; grid-template-columns: minmax(0,1fr) 340px; gap:16px; padding:16px; align-items:start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  #stage { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:10px; overflow:hidden; outline:none; touch-action:none; }
+  #stage:focus { box-shadow:0 0 0 3px var(--acc); }
+  #live, #overlay { position:absolute; inset:0; width:100%; height:100%; }
+  #live { object-fit:fill; }
+  #loupe { position:absolute; width:140px; height:140px; border-radius:50%; border:3px solid #fff; display:none; pointer-events:none; background:#000; }
+  .hint { color:var(--dim); font-size:13px; margin:8px 2px 0; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .panel h2 { font-size:14px; margin:6px 0 0; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  button, .chip { background:#2b2938; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:11px 14px; font-size:15px; cursor:pointer; }
+  button:focus, .chip:focus { outline:3px solid var(--acc); }
+  button.primary { background:var(--acc); color:#1b1530; border-color:var(--acc); font-weight:600; }
+  button.on, .chip.on { background:#3b3358; border-color:var(--acc); }
+  button:disabled { opacity:.5; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row > * { flex:1 1 auto; }
+  label { font-size:13px; color:var(--dim); display:flex; justify-content:space-between; }
+  input[type=range] { width:100%; accent-color:var(--acc); height:28px; }
+  #status { font-size:14px; min-height:2.8em; }
+  #stats { font:12px ui-monospace, monospace; color:var(--dim); white-space:pre-wrap; }
+  #err { color:var(--bad); font-size:13px; }
+  .look { font-size:13px; color:var(--dim); min-height:3em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CamLight Remote</h1>
+  <span id="conn">connecting…</span>
+</header>
+<main>
+  <section>
+    <div id="stage" tabindex="0">
+      <img id="live" alt="">
+      <canvas id="overlay"></canvas>
+      <canvas id="loupe" width="140" height="140"></canvas>
+    </div>
+    <p class="hint">Drag a corner handle (a magnifier shows the exact spot). Or click the picture, press <b>Enter</b> or <b>1–4</b> to choose a corner, then use the <b>arrow keys</b> (Shift = bigger steps).</p>
+  </section>
+  <aside class="panel">
+    <div id="status">Waiting for the phone…</div>
+    <div class="row">
+      <button id="detect" class="primary">Detect TV</button>
+      <button id="showCorners">Show corners on TV</button>
+    </div>
+    <div class="row">
+      <button id="lights">Lights: off</button>
+      <button id="reset">Reset corners</button>
+    </div>
+
+    <h2>Light mode</h2>
+    <div class="row" id="modes"></div>
+    <div class="look" id="lookDesc"></div>
+    <div class="row" id="speeds"></div>
+    <h2>Test variants</h2>
+    <div class="row" id="tests"></div>
+
+    <h2>Color</h2>
+    <div><label>Brightness <span id="brightnessV"></span></label><input id="brightness" type="range" min="0.05" max="1" step="0.01"></div>
+    <div><label>Saturation <span id="saturationV"></span></label><input id="saturation" type="range" min="1" max="1.6" step="0.01"></div>
+    <div><label>Warmth <span id="warmthV"></span></label><input id="warmth" type="range" min="0" max="1" step="0.01"></div>
+    <div class="row">
+      <button id="gray">Gray test</button>
+      <button id="calBlack">Calibrate black</button>
+    </div>
+    <div class="look" id="blackStatus"></div>
+    <div class="row">
+      <button id="calWhite">Calibrate white</button>
+      <button id="clearWhite" style="display:none">Clear white</button>
+    </div>
+    <div class="look" id="whiteStatus"></div>
+
+    <h2>Camera</h2>
+    <div class="row" id="fpsRow">
+      <button class="chip" data-fps="30">30 fps</button>
+      <button class="chip" data-fps="60">60 fps</button>
+    </div>
+    <div class="look" id="fpsNote"></div>
+    <div><label>Zoom <span id="zoomV"></span></label><input id="zoom" type="range" step="0.05"></div>
+    <div><label>Exposure <span id="evV"></span></label><input id="ev" type="range" step="1"></div>
+    <div class="row">
+      <button id="lock">Lock exposure &amp; color</button>
+    </div>
+    <div class="row">
+      <button id="zebra">Zebra</button>
+      <button id="debugImg">Detection image</button>
+    </div>
+    <div id="stats"></div>
+    <div id="err"></div>
+  </aside>
+</main>
+
+<script>
+(function () {
+  const K = new URLSearchParams(location.search).get('k') || '';
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), live = $('live'), cv = $('overlay'), ctx = cv.getContext('2d'), loupe = $('loupe'), lctx = loupe.getContext('2d');
+  const NAMES = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
+
+  let S = null;                 // last state from the phone
+  let quad = [0.3,0.3, 0.7,0.3, 0.7,0.7, 0.3,0.7];
+  let selected = 0, dragging = -1, lastEdit = 0, pendingCorner = null, sendTimer = null;
+  let showDebug = false;
+
+  const url = (p, extra) => p + '?k=' + encodeURIComponent(K) + (extra || '');
+  function post(cmd) {
+    return fetch(url('/cmd'), { method: 'POST', body: JSON.stringify(cmd) }).then(r => r.json()).catch(() => null);
+  }
+
+  // ───────── live image ─────────
+  function nextFrame() { live.src = url('/frame.jpg', (showDebug ? '&debug=1' : '') + '&t=' + Date.now()); }
+  live.onload = () => { setConn(true); setTimeout(nextFrame, 60); draw(); };
+  live.onerror = () => setTimeout(nextFrame, 400);
+  nextFrame();
+
+  // ───────── state ─────────
+  function setConn(ok) { const c = $('conn'); c.textContent = ok ? 'connected' : 'cannot reach the phone'; c.className = ok ? 'ok' : 'bad'; }
+  function poll() {
+    fetch(url('/state')).then(r => r.json()).then(s => { S = s; setConn(true); applyState(); }).catch(() => setConn(false))
+      .finally(() => setTimeout(poll, 400));
+  }
+  poll();
+
+  function setBtn(id, on, text) { const b = $(id); b.classList.toggle('on', !!on); if (text) b.textContent = text; }
+  function setRange(id, v, min, max, fmt) {
+    const el = $(id);
+    if (min !== undefined) { el.min = min; el.max = max; }
+    if (document.activeElement !== el) el.value = v;
+    $(id + 'V').textContent = fmt ? fmt(v) : v;
+  }
+  function applyState() {
+    const s = S;
+    if (Date.now() - lastEdit > 900 && dragging < 0) quad = s.quad.slice();
+    showDebug = !!s.showDebug;
+    $('status').textContent = s.detectStatus || (s.detecting ? 'Working…' : 'Ready. Drag the corners onto the TV picture.');
+    $('detect').disabled = s.detecting; $('showCorners').disabled = s.detecting;
+    setBtn('lights', s.lights, 'Lights: ' + (s.lights ? 'on' : 'off'));
+    setBtn('gray', s.gray, s.gray ? 'Gray test: on' : 'Gray test');
+    setBtn('lock', s.lock, s.lock ? 'Unlock exposure & color' : 'Lock exposure & color');
+    setBtn('zebra', s.showZebra); setBtn('debugImg', s.showDebug);
+    const modes = $('modes'), tests = $('tests');
+    if (modes.children.length + tests.children.length !== s.looks.length) {
+      modes.innerHTML = ''; tests.innerHTML = '';
+      s.looks.forEach(l => {
+        const b = document.createElement('button'); b.className = 'chip'; b.dataset.id = l.id;
+        b.textContent = l.test ? l.id : l.name; b.title = l.desc; b.onclick = () => post({a:'look', id:l.id});
+        (l.test ? tests : modes).appendChild(b);
+      });
+      const sp = $('speeds'); sp.innerHTML = '';
+      s.speeds.forEach(n => { const b = document.createElement('button'); b.className = 'chip'; b.dataset.id = n.id; b.textContent = n.label; b.onclick = () => post({a:'smoothing', name:n.id}); sp.appendChild(b); });
+    }
+    [...modes.children, ...tests.children].forEach(b => b.classList.toggle('on', b.dataset.id === s.look));
+    [...$('speeds').children].forEach(b => b.classList.toggle('on', b.dataset.id === s.smoothing));
+    const lk = s.looks.find(l => l.id === s.look); $('lookDesc').textContent = lk ? lk.name + ': ' + lk.desc : '';
+    $('whiteStatus').textContent = s.whiteStatus || (s.hasWhite ? 'White calibration saved.' : 'Show a plain white screen on the TV (room lights as usual), then tap Calibrate white.');
+    $('clearWhite').style.display = s.hasWhite ? '' : 'none';
+    [...$('fpsRow').children].forEach(b => { b.classList.toggle('on', +b.dataset.fps === s.cameraFps); b.disabled = s.detecting; });
+    $('fpsNote').textContent = (s.fpsActual && s.fpsActual !== s.cameraFps) ? s.cameraFps + ' fps is not available here; running at ' + s.fpsActual + ' fps.' : '';
+    setRange('brightness', s.brightness, undefined, undefined, v => Math.round(v * 100) + '%');
+    setRange('saturation', s.saturation, undefined, undefined, v => Math.round(v * 100) + '%');
+    setRange('warmth', s.warmth, undefined, undefined, v => Math.round(v * 100) + '%');
+    setRange('zoom', s.zoom, s.zoomMin, Math.max(s.zoomMax, s.zoomMin + 0.01), v => (+v).toFixed(1) + '×');
+    setRange('ev', s.ev, s.evMin, Math.max(s.evMax, s.evMin + 1), v => (v * s.evStep >= 0 ? '+' : '') + (v * s.evStep).toFixed(1) + ' EV');
+    $('ev').disabled = s.lock;
+    $('blackStatus').textContent = s.blackStatus || '';
+    $('stats').textContent = (s.summary || '') + '\n' + s.stats.fps + ' fps in · ' + s.stats.ms.toFixed(1) + ' ms/frame' + (s.stats.age > 0 ? ' · frame age ' + Math.round(s.stats.age) + ' ms' : '');
+    $('err').textContent = s.error || '';
+    draw();
+  }
+
+  // ───────── buttons / sliders ─────────
+  $('detect').onclick = () => post({a:'detect'});
+  $('showCorners').onclick = () => post({a:'showCorners'});
+  $('lights').onclick = () => post({a:'lights', on: !(S && S.lights)});
+  $('reset').onclick = () => post({a:'resetCorners'});
+  $('gray').onclick = () => post({a:'gray', on: !(S && S.gray)});
+  [...$('fpsRow').children].forEach(b => b.onclick = () => post({a:'cameraFps', v:+b.dataset.fps}));
+  $('calBlack').onclick = () => post({a:'calibrateBlack'});
+  $('calWhite').onclick = () => post({a:'calibrateWhite'});
+  $('clearWhite').onclick = () => post({a:'clearWhite'});
+  $('lock').onclick = () => post({a:'lock', on: !(S && S.lock)});
+  $('zebra').onclick = () => post({a:'zebra', on: !(S && S.showZebra)});
+  $('debugImg').onclick = () => post({a:'debugImage', on: !(S && S.showDebug)});
+  function slider(id, action) {
+    let t = 0;
+    $(id).addEventListener('input', e => {
+      const v = parseFloat(e.target.value);
+      $(id + 'V').textContent = e.target.value;
+      const now = Date.now(); if (now - t < 80) return; t = now;
+      post({a: action, v});
+    });
+    $(id).addEventListener('change', e => post({a: action, v: parseFloat(e.target.value)}));
+  }
+  slider('brightness', 'brightness'); slider('saturation', 'saturation'); slider('warmth', 'warmth');
+  slider('zoom', 'zoom'); slider('ev', 'ev');
+
+  // ───────── overlay drawing ─────────
+  function fit() {
+    const r = stage.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(r.width * d) || cv.height !== Math.round(r.height * d)) { cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d); }
+  }
+  window.addEventListener('resize', draw);
+  function draw() {
+    fit();
+    const w = cv.width, h = cv.height, d = window.devicePixelRatio || 1;
+    ctx.clearRect(0, 0, w, h);
+    if (S && S.showZebra && S.zebra) {
+      const z = S.zebra, cw = w / z.cols, ch = h / z.rows;
+      ctx.fillStyle = 'rgba(255,23,68,.4)';
+      for (let i = 0; i < z.cells.length; i++) if (z.cells[i] === '1') ctx.fillRect((i % z.cols) * cw, Math.floor(i / z.cols) * ch, cw, ch);
+    }
+    if (S && S.dots) {
+      S.dots.forEach(p => { ctx.fillStyle = '#' + (p[2] & 0xFFFFFF).toString(16).padStart(6, '0'); ctx.beginPath(); ctx.arc(p[0] * w, p[1] * h, 3 * d, 0, 7); ctx.fill(); });
+    }
+    if (S && S.silhouette) {
+      ctx.strokeStyle = '#ffd600'; ctx.lineWidth = 1.5 * d; ctx.setLineDash([8 * d, 6 * d]); poly(S.silhouette, w, h); ctx.setLineDash([]);
+    }
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * d; poly(quad, w, h);
+    for (let i = 0; i < 4; i++) {
+      const x = quad[i * 2] * w, y = quad[i * 2 + 1] * h, sel = i === selected;
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.arc(x, y, 20 * d, 0, 7); ctx.fill();
+      ctx.strokeStyle = (i === dragging) ? '#00e676' : (sel ? '#cbb8ff' : '#fff'); ctx.lineWidth = (sel ? 4 : 3) * d;
+      ctx.beginPath(); ctx.arc(x, y, (sel ? 13 : 10) * d, 0, 7); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = (12 * d) + 'px system-ui'; ctx.fillText(String(i + 1), x + 14 * d, y - 14 * d);
+    }
+  }
+  function poly(q, w, h) {
+    ctx.beginPath(); ctx.moveTo(q[0] * w, q[1] * h);
+    for (let i = 1; i < 4; i++) ctx.lineTo(q[i * 2] * w, q[i * 2 + 1] * h);
+    ctx.closePath(); ctx.stroke();
+  }
+
+  // ───────── corner editing ─────────
+  function sendCorner(i) {
+    pendingCorner = i;
+    if (sendTimer) return;
+    sendTimer = setTimeout(() => {
+      sendTimer = null; const j = pendingCorner;
+      post({a:'corner', i: j, x: quad[j * 2], y: quad[j * 2 + 1]});
+    }, 60);
+  }
+  function setCorner(i, x, y) {
+    quad[i * 2] = Math.min(1, Math.max(0, x)); quad[i * 2 + 1] = Math.min(1, Math.max(0, y));
+    lastEdit = Date.now(); sendCorner(i); draw();
+  }
+  function pos(e) { const r = stage.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, e.clientX - r.left, e.clientY - r.top, r]; }
+
+  cv.addEventListener('pointerdown', e => {
+    stage.focus();
+    const [nx, ny, px, py, r] = pos(e);
+    let best = -1, bd = 1e9;
+    for (let i = 0; i < 4; i++) { const dx = quad[i * 2] * r.width - px, dy = quad[i * 2 + 1] * r.height - py, dd = Math.hypot(dx, dy); if (dd < bd) { bd = dd; best = i; } }
+    if (bd < 46) { dragging = best; selected = best; cv.setPointerCapture(e.pointerId); e.preventDefault(); showLoupe(px, py, r); draw(); }
+  });
+  cv.addEventListener('pointermove', e => {
+    if (dragging < 0) return;
+    const [nx, ny, px, py, r] = pos(e);
+    setCorner(dragging, nx, ny); showLoupe(px, py, r);
+  });
+  const endDrag = () => { if (dragging >= 0) { const j = dragging; dragging = -1; loupe.style.display = 'none'; post({a:'corner', i: j, x: quad[j * 2], y: quad[j * 2 + 1]}); draw(); } };
+  cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+
+  function showLoupe(px, py, r) {
+    const iw = live.naturalWidth || 640, ih = live.naturalHeight || 360, win = 36;
+    const cx = quad[dragging * 2] * iw, cy = quad[dragging * 2 + 1] * ih;
+    lctx.imageSmoothingEnabled = false; lctx.fillStyle = '#000'; lctx.fillRect(0, 0, 140, 140);
+    try { lctx.drawImage(live, Math.round(cx - win / 2), Math.round(cy - win / 2), win, win, 0, 0, 140, 140); } catch (e) {}
+    lctx.strokeStyle = '#ff1744'; lctx.lineWidth = 1.5; lctx.beginPath(); lctx.moveTo(70, 55); lctx.lineTo(70, 85); lctx.moveTo(55, 70); lctx.lineTo(85, 70); lctx.stroke();
+    const above = py > 190;
+    loupe.style.left = Math.min(Math.max(px - 70, 0), r.width - 140) + 'px';
+    loupe.style.top = (above ? py - 175 : py + 40) + 'px';
+    loupe.style.display = 'block';
+  }
+
+  // keyboard / TV remote
+  let heldKey = null, repeat = 0;
+  stage.addEventListener('keydown', e => {
+    const k = e.key;
+    if (k >= '1' && k <= '4') { selected = +k - 1; draw(); e.preventDefault(); return; }
+    if (k === 'Enter' || k === 'Tab') { selected = (selected + (e.shiftKey ? 3 : 1)) % 4; draw(); e.preventDefault(); return; }
+    const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
+    if (!dir) return;
+    e.preventDefault();
+    repeat = (heldKey === k && e.repeat) ? repeat + 1 : 0; heldKey = k;
+    const mult = (e.shiftKey ? 5 : 1) * Math.min(1 + Math.floor(repeat / 6), 8);
+    const iw = live.naturalWidth || 640, ih = live.naturalHeight || 360;
+    setCorner(selected, quad[selected * 2] + dir[0] * mult / iw, quad[selected * 2 + 1] + dir[1] * mult / ih);
+  });
+  stage.addEventListener('keyup', () => { heldKey = null; repeat = 0; });
+  stage.focus();
+})();
+</script>
+</body>
+</html>
