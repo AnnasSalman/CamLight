@@ -362,6 +362,7 @@ Measure, do not assume: ship a **latency test mode** (see 11).
 | M1c | Done | Remote control web page (5.6): live view, corner dragging with magnifier, D-pad nudging, all controls, QR/URL on the phone |
 | M1d | Done | Light modes (5.7): Basic, Natural, Room light, Cinema, Vivid; black and white calibration; hue-preserving color processing |
 | M1e | Done | Camera speed 30/60 fps (4.2); paced, de-duplicated DDP output; worker-thread preview (see 15 for the reference-setup findings) |
+| M5a | Built, awaiting first CI run | **14.11:** GitHub Actions build/test/APK artifact, shared debug signing key via repository secret, install and LAN-serve helper scripts |
 | M1f | Built, not yet tested on the TV | TV test page, route 1 of 14.4: `/p/<code>` page for the TV browser, `/pattern` feed with 12 patterns, TV-page status on the remote page, manual pattern buttons, *Calibrate black + white with the TV page* sequence; routes 2 and 3 (Cast, Android TV Remote protocol) not started |
 | M2 | Planned | **Everyday use (14.1-14.3):** auto off for TV-off/static screens, background run with the screen off, bump detection with automatic re-anchoring |
 | M3 | Planned | **Setup and profiles (14.4-14.6):** calibration test patterns served to the TV's own browser, guided setup on the remote page, lamps-on/lamps-off profiles |
@@ -546,7 +547,8 @@ A single ordered flow with validation, replacing the scattered buttons: 1 *Place
 - The repository is private, so artifacts need a GitHub login; for quick installs without a cable a helper script that serves the APK on the LAN (as used during development) is also kept in `tools/`.
 - Test results are published in the job summary.
 
-### 14.12 LED strip simulator on the remote page (P3)
+**Implemented (M5a).** `.github/workflows/build.yml` (push to `main`, pull requests, manual run) on `ubuntu-latest`: checkout, Temurin 17 with Gradle cache, the Android SDK (`android-actions/setup-android@v3`, platform 36, build-tools 35 and 36), restore of the debug signing key from the repository secret `DEBUG_KEYSTORE_BASE64` (with a warning and a fresh key if the secret is absent), `testDebugUnitTest assembleDebug`, a Markdown test summary (`tools/test_summary.py`), the APK's signing-certificate fingerprint in the summary, and the APK uploaded as artifact `camlight-debug-apk` (14 days; test reports kept on failure). Helper scripts: `tools/install-ci-apk.ps1` downloads the latest successful build with the owner's `gh` login and installs it on every adb-connected phone; `tools/serve-apk.ps1` serves an APK on the LAN for cable-free installs. `.gitattributes` pins line endings (LF for `gradlew`) so the Linux runner builds what Windows commits. The signing key is the project's existing debug key (created on the developer's PC on 2026-10-18), so CI builds and local builds can update each other and no reinstall is needed.
+ LED strip simulator on the remote page (P3)
 Add the current per-LED output (267 × 3 bytes, base64, ~5 Hz) to `/state` or a `/leds` endpoint and draw the LEDs as dots around the TV box. It lets a developer check the pipeline without looking at the TV and makes remote debugging of corner tints possible.
 
 ### 14.13 Control API for Home Assistant and automations (P3)
