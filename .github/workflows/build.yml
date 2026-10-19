@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -37,7 +37,8 @@ jobs:
         run: |
           mkdir -p ~/.android
           if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+            # tr removes any stray carriage returns or newlines that a Windows shell may have added to the secret
+            echo "$DEBUG_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > ~/.android/debug.keystore
             echo "Using the provided debug keystore."
           else
             echo "::warning::No DEBUG_KEYSTORE_BASE64 secret. The APK is signed with a fresh debug key and cannot update an app signed with another key."
@@ -69,3 +70,4 @@ jobs:
           name: test-reports
           path: app/build/reports/tests
           retention-days: 7
+          if-no-files-found: ignore
