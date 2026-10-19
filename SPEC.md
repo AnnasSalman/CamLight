@@ -183,7 +183,7 @@ The strip has **300 WS2812 LEDs on the controller, but only a subset is mounted 
 **Solution.** While the camera screen is open, the phone runs a small HTTP server on the local network. Any browser (reference: laptop or second phone for setup; the Google TV's browser also works) opens the page and gets a live view plus every control. No separate app is needed.
 
 - **Address and access:** `http://<phone-ip>:8080/?k=<key>`. The phone shows the address as text and a QR code on the camera screen (scan from a second phone), and logs it to logcat. `<key>` is a random 8-character secret created once and stored; every request must carry it (LAN-only, no accounts). The port falls back to the next free one if 8080 is taken.
-- **Endpoints:** `GET /` (page), `GET /frame.jpg` (latest preview as JPEG, ~640×360, ~8 fps polled; `?debug=1` serves the detection image), `GET /state` (JSON), `POST /cmd` (JSON action). No streaming connection is held open, so any browser works.
+- **Endpoints:** `GET /` (page), `GET /frame.jpg` (latest preview as JPEG, ~640×360, ~8 fps polled; `?debug=1` serves the detection image), `GET /state` (JSON), `POST /cmd` (JSON action), plus the TV test page endpoints `GET /p/<code>` (page for the TV's browser) and `GET /pattern` (which pattern to show), which accept a short 4-digit code instead of the key (see 14.4). No streaming connection is held open, so any browser works.
 - **State JSON:** corner quad, detected silhouette, per-LED sample dots (x, y, color), zebra cells (already in display orientation), lights on/off, look, speed, brightness, saturation, warmth, zoom range and value, exposure range and value, lock, detection status, black calibration status, stats (fps, ms, frame age), errors.
 - **Commands:** move/set corners, reset corners, detect TV, show corners on the TV, lights on/off, look A-F, speed, brightness, saturation, warmth, zoom, exposure, lock, calibrate/clear black, gray test, zebra, detection image.
 - **Corner fine-tuning in the page:**
@@ -192,7 +192,7 @@ The strip has **300 WS2812 LEDs on the controller, but only a subset is mounted 
   - Edits apply to the LED sample zones on the phone immediately (throttled to ~15 updates/s) and are persisted.
 - **Why polling, not WebSocket/MJPEG:** a hand-rolled single-file server stays dependency-free; polling needs no persistent connections; ~300 KB/s of JPEG is negligible on Wi-Fi.
 - **Lifecycle:** the server runs only while the camera screen is open (the phone must stay awake and on that screen, display dimmed). Settings changed remotely are saved immediately.
-- **Security notes:** HTTP without TLS on the home LAN, protected by the key; no file access, no shell, request bodies capped at 16 KB, small connection pool. Anyone on the LAN who knows the key could change lighting settings, nothing more.
+- **Security notes:** HTTP without TLS on the home LAN, protected by the key; no file access, no shell, request bodies capped at 16 KB, small connection pool. Anyone on the LAN who knows the key could change lighting settings, nothing more. The short TV-page code opens only the test page and the pattern feed (it cannot read frames, state or send commands), so someone who learns it could at most see the test screen or probe the pattern feed.
 
 ### 5.7 Light modes
 The user-facing choice is a **mode**; each mode is a preset of processing parameters (and a default speed). Modes are switchable live, from the phone or the remote page. The first test variants (looks A-F) remain available as *test variants*; **A is now called Basic** and is the reference behavior (global black floor, saturation 120%, warmth 70%).
@@ -354,29 +354,217 @@ Measure, do not assume: ship a **latency test mode** (see 11).
 
 ## 12. Milestones
 
-| M | Scope |
-|---|---|
-| M0 | WLED connect + **Strip setup UI (5.4)**: discover controller, live-light a chosen side from the phone, save segments. No camera needed |
-| M1 | Camera2 pipeline + manual preview + AE/AWB lock + device capability dump (Redmi Note 13); DDP/UDP sender; fixed zones with simple averaging → working lights |
-| M1b | **Preview from analysis frames (fixes stretch/axis bug); automatic TV detection via LED-halo silhouette (5.1); corner fine-tuning with magnifier; verification lights on the TV** |
-| M1d | **Light modes (5.7): Basic, Natural, Room light, Cinema, Vivid; white calibration; hue-preserving color processing** |
-| M1c | **Remote control web page (5.6): live view, corner dragging with magnifier, D-pad nudging, all controls, QR/URL on the phone** |
-| M2 | Homography + LED mapping UI refinements; native sampler; adaptive smoothing; placement guide, bump detection and automatic re-anchoring (5.5) |
-| M3 | Color calibration wizard (offset, gains, 3×3, tone curve); flicker/clipping tools; presets |
-| M4 | Foreground service, thermal management, discovery, WLED setup checklist; latency test mode |
-| M5 | Polish, letterbox detection, 3D LUT option, corner-tracking drift warning, beta on multiple phones |
+| M | Status | Scope |
+|---|---|---|
+| M0 | Done | WLED connect + **Strip setup UI (5.4)**: discover controller, live-light a chosen side from the phone, save segments. No camera needed |
+| M1 | Done | Camera2 pipeline + AE/AWB lock + device capability dump; DDP sender; sampled zones → working lights |
+| M1b | Done | Preview from analysis frames; automatic TV detection via LED-halo silhouette (5.1); corner fine-tuning with magnifier; verification lights on the TV |
+| M1c | Done | Remote control web page (5.6): live view, corner dragging with magnifier, D-pad nudging, all controls, QR/URL on the phone |
+| M1d | Done | Light modes (5.7): Basic, Natural, Room light, Cinema, Vivid; black and white calibration; hue-preserving color processing |
+| M1e | Done | Camera speed 30/60 fps (4.2); paced, de-duplicated DDP output; worker-thread preview (see 15 for the reference-setup findings) |
+| M1f | Built, not yet tested on the TV | TV test page, route 1 of 14.4: `/p/<code>` page for the TV browser, `/pattern` feed with 12 patterns, TV-page status on the remote page, manual pattern buttons, *Calibrate black + white with the TV page* sequence; routes 2 and 3 (Cast, Android TV Remote protocol) not started |
+| M2 | Planned | **Everyday use (14.1-14.3):** auto off for TV-off/static screens, background run with the screen off, bump detection with automatic re-anchoring |
+| M3 | Planned | **Setup and profiles (14.4-14.6):** calibration test patterns served to the TV's own browser, guided setup on the remote page, lamps-on/lamps-off profiles |
+| M4 | Planned | **Color quality (14.7-14.9):** letterbox/pillarbox detection, per-zone flat-field calibration, dominant-color weighting |
+| M5 | Planned | **Supportability (14.10-14.12):** diagnostics export, CI build of the APK, remote-page LED strip simulator |
+| M6 | Planned | **Integrations and robustness (14.13-14.16):** control API for Home Assistant, thermal management, device profiles (second phone), optional automatic mode selection |
 
 ---
 
 ## 13. Open questions / risks
 
-1. **Latency floor depends on the phone's camera HAL** (30–60 ms is outside our control); we need to benchmark 3–4 devices early, ideally in M1.
-2. Is manual white balance (`COLOR_CORRECTION_GAINS`) reliably supported on target devices, or will we depend on AWB lock only?
-3. DDP vs plain UDP realtime: both should work on current WLED; confirm on the user's firmware version (DDP may need enabling on pre-0.13 builds).
-4. Whether a 3×3 matrix is enough for panels with strong gamut differences (wide-gamut OLED vs sensor); 3D LUT is the fallback.
-5. Do we want a companion mode on **Android TV** using `MediaProjection` (no camera, exact colors) for non-DRM content? Out of scope for v1 but the `Frame source` interface should allow it.
-6. ~~LED count / controller~~ Answered, see section 15.
-7. Redmi Note 13 camera capability (60 fps at 720p in Camera2? manual sensor controls? hardware level?) is unknown until tested; M1 includes a capability dump screen.
+1. **Latency floor depends on the phone's camera HAL** (30-60 ms is outside our control). Measure on each target phone; the app already logs frame age (`adb logcat -s CamLight`).
+2. Is manual sensor control (exposure time, ISO, `COLOR_CORRECTION_GAINS`) available on each target phone, or only AE/AWB lock? This decides whether calibration profiles (14.6) can restore exact exposure or must re-lock.
+3. Whether a 3×3 matrix is enough for panels with strong gamut differences (wide-gamut OLED vs sensor); a 3D LUT is the fallback.
+4. A companion mode on Android TV using `MediaProjection` (no camera, exact colors) for non-DRM content is out of scope, but the frame-source interface should allow it.
+5. **Camera in the background (14.2) on Xiaomi HyperOS:** even a correctly declared camera foreground service may be killed when the app is cleared from recents, and camera access while the screen is off has not been verified on the reference phones. Needs an on-device test before promising "lights with the screen off".
+6. **Second phone (Tecno Spark 6, Android 10, Helio G70, 2.4 GHz Wi-Fi only):** its Camera2 hardware level, AE/AWB lock availability and frame-rate ranges are unknown until its *Camera info* output is read. See 14.15.
+7. **Controller Wi-Fi jitter:** the ESP32 shows packet loss and spikes under sustained streaming even from a PC; output is paced (30 packets/s, unchanged frames skipped). Further relief would be a better channel/position or a wired controller.
+8. External USB cameras are not exposed by Camera2 on most phones; supporting one means a UVC library inside the app. Not researched in depth; see 14.15.
+
+---
+
+## 14. Planned features (backlog)
+
+Priority: **P1** = fixes a visible annoyance found in testing, **P2** = quality and supportability, **P3** = convenience. Dependencies are listed per item. Everything here is a design, not yet built; statements marked *(researched)* come from the sources in section 16, statements marked *(design)* are our own proposal and must be validated on the reference setup.
+
+| # | Feature | Priority | Depends on |
+|---|---|---|---|
+| 14.1 | Auto off for TV-off / blank / static screens | P1 | none |
+| 14.2 | Background run (foreground service, screen off) | P1 | 14.1 helps (idle camera rate) |
+| 14.3 | Bump detection and automatic re-anchoring | P1 | none |
+| 14.4 | Calibration test patterns shown by the TV's browser | P1 | remote page (5.6) |
+| 14.5 | Guided setup flow on the remote page | P1 | 14.4 |
+| 14.6 | Calibration profiles (lamps on / lamps off) | P1 | 5.7 calibrations |
+| 14.7 | Letterbox / pillarbox detection | P2 | 5.1 geometry |
+| 14.8 | Per-zone flat-field (black + white) calibration | P2 | 14.4, 14.6 |
+| 14.9 | Dominant-color weighting | P2 | none |
+| 14.10 | Diagnostics export | P2 | none |
+| 14.11 | CI build of the APK on GitHub | P2 | none |
+| 14.12 | LED strip simulator on the remote page | P3 | none |
+| 14.13 | Control API for Home Assistant and automations | P3 | 14.2 |
+| 14.14 | Thermal management | P3 | none |
+| 14.15 | Device profiles and the second phone; external camera research | P3 | camera info |
+| 14.16 | Automatic mode selection | P3 | 5.7 modes |
+
+### 14.1 Auto off for TV-off, blank and static screens (P1)
+**Why.** Today the LEDs show whatever the camera sees, so a TV that is off, paused or showing a blank screen still produces light (and, in the reference setup, tinted dark readings). Camera-based competitors turn the lights off automatically when they detect a blank or static screen *(researched: Govee reviews)*. Ambilight clones also gate updates on frame difference *(researched: an open-source Rust ambilight skips updates below a change threshold, then smooths)*.
+
+**Design.**
+- **Per-frame measurements** on a coarse 16×9 grid of samples *inside the picture quad* (cheap, from the existing homography): mean luma `L`, frame-to-frame change `D` (mean absolute difference vs the previous grid), and `L` relative to the calibrated black floor.
+- **States:** `ACTIVE` → `BLANK` → `IDLE`, and `ACTIVE` → `STATIC` → `IDLE`.
+  - `BLANK`: `L ≤ blackFloorLuma + 2 %` and `D < noiseFloor` for `blankAfter` (default 15 s).
+  - `STATIC`: `D < 1 %` of full scale for `staticAfter` (default 120 s). Cinema mode doubles both timers.
+  - Leave `IDLE` as soon as `D > 3 %` or `L` rises above the blank threshold for 0.5 s (wake quickly).
+- **Idle action (setting):** *off* (fade to black over 2 s, then `{"live":false}`), *WLED preset* (`POST /json/state {"ps":N}`; presets are applied with `ps` *(researched: WLED JSON API)*), or *dim warm ambient* (fixed color at a set brightness).
+- **While idle:** lower the camera to ~5 fps and skip the preview and zebra work to save heat and CPU; keep the check running.
+- **Ignore small bright spots** (the TV's power LED) by computing `L` and `D` on the trimmed mean of the grid, not the maximum. Nanoleaf's camera was reported picking up a TV power LED *(researched: reviews)*.
+- **Noise floor:** measured once per session as `D` over the first 2 s of a known-static scene, or taken from the black calibration frames.
+- **UI:** status chip (Active / Blank / Static / Idle), timers and idle action on the phone and remote page, a *Wake now* button.
+
+**Edge cases.** Dark movie scenes and credits can look "static"; mitigated by longer Cinema timers and the fast wake rule. Screensavers or slow ambient video may stay `ACTIVE`, which is acceptable. Flicker from the camera in near-black scenes must not read as motion (use the noise floor).
+
+**Acceptance.** TV powered off → LEDs off within `blankAfter + 2 s`; paused frame → idle within `staticAfter + 2 s`; resuming playback → LEDs back within 1 s; no flapping in a 30-minute dark-film test.
+
+### 14.2 Background run with the screen off (P1)
+**Why.** With the phone mounted screen-to-wall nobody needs its display, and a continuously lit screen wastes power and generates heat.
+
+**Platform rules *(researched, Android docs)*.**
+- A camera foreground service needs `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_CAMERA` in the manifest, `android:foregroundServiceType="camera"`, and the granted `CAMERA` runtime permission.
+- The camera permission is *while-in-use*: on Android 14+ **a camera foreground service cannot be created while the app is in the background**, even if a background-start exemption applies. It must be started with a visible activity (or via a user tap on a notification or widget). Once running it may keep using the camera in the background, which is the stated purpose of the type.
+- Consequence: **the remote page cannot start the camera from a cold, closed app.** The app must have been started once from the phone's UI (or a notification action), after which the service keeps running.
+- On Xiaomi/HyperOS, background work is restricted by default; clearing the app from recents can kill even a foreground service. Required user steps: enable *Autostart*, set battery to *No restrictions*, and *lock* the app in the recents list *(researched: dontkillmyapp and vendor guides; menu names vary by version)*.
+
+**Design.**
+- `CameraService` (foreground, type camera) owns the camera engine, processor, DDP sender, remote web server and WLED client; the UI becomes a thin client that binds to it. Persistent notification with actions *Lights on/off* and *Stop*.
+- **Standby state:** the service can run with the camera closed and only the web server alive (low power). *Lights on* from the remote page opens the camera inside the already-running service. Whether the camera can be opened from standby while the screen is off must be verified on the reference phones; if not, fall back to keeping the camera open at a low frame rate.
+- Screen: the camera screen sets `FLAG_KEEP_SCREEN_ON` today; in service mode it is released so the screen can time out. A partial wake lock and the existing Wi-Fi low-latency lock stay held while lights are on.
+- **Onboarding:** a one-time checklist screen deep-links to the app's battery, autostart and notification settings and explains the recents lock.
+- **Self-check:** if the service is killed unexpectedly, the next app start shows "background run was interrupted" with the checklist.
+
+**Acceptance.** Start lights, press the power button: lights keep following the picture for 30 minutes; the remote page still works; phone temperature stays under the thermal limit in 14.14.
+
+### 14.3 Bump detection and automatic re-anchoring (P1)
+**Why.** The phone sits on a shelf and is touched during setup; any shift invalidates the TV box (extends 5.5). Even Govee's fixed camera drifts when its adhesive weakens *(researched: forum report)*.
+
+**Design.**
+- **Bump detection (instant):** gyroscope and accelerometer via `SensorManager`. Flag a bump when angular speed exceeds 0.05 rad/s for > 100 ms or an acceleration spike exceeds 0.3 g; track pitch/roll drift from the gravity vector (> 0.5° from the calibration pose). Sensor events only *trigger* an image check; they do not move the box themselves.
+- **Image registration:** keep a reference gray image (160×90 from the 640×360 preview) of the *background* (everything outside the TV box, with the LED-glow areas masked). On a trigger, and at 2 Hz in the background, estimate the translation between reference and live with **phase correlation** and cheap sub-pixel refinement *(researched: basic phase correlation gives whole-pixel peaks; sub-pixel accuracy is reached by upsampling the DFT only near the peak, or by peak fitting)*. Apply a Hann window and a high-pass to cope with low-texture shelves and walls.
+  - To also capture small rotation/scale, run it on four background patches and fit a similarity transform.
+- **Decision rule:** peak ratio < 0.2 → "no confident estimate". Shift within 3 % of the frame → move the stored corners by the estimated transform automatically and log it. Larger shift, or no confident estimate three checks in a row → pause lights.
+- **Recovery:** if the TV is idle (14.1) run a short single-cycle halo detection (≈3 s) automatically; otherwise show "Phone moved: recalibrate" on the remote page and the phone, with a one-tap *Re-detect*.
+- **Confidence indicator** in both UIs: *Detected*, *Re-anchored (Δ x px)*, *Needs recalibration*.
+
+**Edge cases.** A moved person or furniture in the background is an outlier: use a robust (median) combination across patches. The TV picture itself must be excluded from the reference.
+
+**Acceptance.** Nudge the phone by 5-30 px: corners follow within 1 px without user action; a 10 cm shove triggers the recalibrate prompt.
+
+### 14.4 Calibration test patterns shown by the TV (P1)
+**Why.** Black and white calibration currently asks the user to find a white video. The TV (Google TV with a browser) can display exact patterns itself, driven by the phone.
+
+**Delivery routes, in the order we try them** *(researched where noted; none tested on the reference TV yet)*:
+1. **TV browser page (built first, certain to work).** The user opens a short address in the TV's browser once and presses OK for full screen. Everything after that is automatic.
+2. **Google Cast (experiment).** Google's Default Media Receiver (app ID `CC1AD845`) needs no registration; a third-party source lists supported image formats as BMP, GIF, JPEG, PNG and WEBP. The phone would host solid-color images and cast one per pattern, removing the one-time step. Unverified: whether the receiver accepts cleartext `http://` media URLs, whether an image fills the screen without letterboxing, whether colors stay exact. Needs the Cast sender library and Google Play services on the phone.
+3. **Android TV Remote protocol (later, only if 2 fails).** The protocol used by the Google TV phone app (and by Home Assistant's Android TV Remote integration) can send keys and open a link on the TV after a one-time pairing code. Opening an HTTP link depends on a TV app handling it; users report mixed results and trial and error, and the protocol is not officially documented, so it would have to be implemented from scratch.
+
+**Design of route 1 (this milestone).**
+- **Address:** `http://<phone-ip>:<port>/p/<code>` where `<code>` is a 4-digit code shown on the phone and on the remote page. The code only grants access to the test page and the pattern endpoint, not to any control, so it is short enough to type with a TV remote. (The full-key addresses of 5.6 are unchanged.)
+- **Page:** a full-screen div; click or Enter requests browser fullscreen; cursor hidden; a screen wake lock is requested where supported. While no pattern is active it shows a dark screen with the text "CamLight test screen, press OK for full screen, waiting for the phone".
+- **Polling:** the page calls `GET /pattern?c=<code>&w=&h=&fs=&ua=` every 300 ms and receives `{id, label, rgb, style}` (or `{id: "none"}` when nothing should be shown). The query reports the page's viewport size, whether it is full screen and a short user-agent string, so the phone can tell the user when the browser chrome is visible or the page is scaled (overscan). The call also acts as the heartbeat: the phone treats the TV page as connected if it was seen in the last 2 s.
+- **Patterns:** black, white, 25/50/75 % gray, red, green, blue, cyan, magenta, yellow, and *edge markers* (white field with red/green/blue/yellow lines on the four extreme edges plus a center cross, to reveal overscan or cropping). Values are exact sRGB; no gradients, no animation.
+- **Remote page:** a *TV test patterns* section: connection status (size, full screen, user agent), the address to open on the TV, one button per pattern and *Off*. A button **Calibrate black + white with the TV page** runs: black → wait 1.8 s → measure black (existing procedure, 60 frames) → white → wait 1.8 s → measure white → patterns off. Each step uses the existing checks (black must read black, white must not clip, with the same messages).
+- **Phone:** the Remote control box also shows the TV test page address and code.
+
+**Next, using the same channel.** Gray steps (camera tone response), primaries and secondaries (fit the 3×3 color matrix of 5.2), full-field white/gray (flat-field maps, 14.8), a white field to fit the exact picture edges (bezel inset), and the guided setup (14.5).
+
+**Caveats.** The TV's picture mode (brightness, local dimming, automatic brightness limiter, HDR tone mapping) affects what the camera sees; calibrate in the mode normally used for ambient lighting. Some TV browsers keep an address bar visible, overscan the page or sleep the screen during long sessions; the page reports its size back and sessions are kept short (< 30 s). Pixel values can be altered if the page is cast from another device instead of opened natively (video compression and scaling), so cast only as a convenience.
+
+**Status.** Route 1 is implemented (M1f). Verified so far: server routes and codes by unit tests; the page renders exact colors in a headless Chrome (white 255,255,255; cyan 0,255,255; edge markers on all four edges). Not yet verified on the reference TV's browser: full-screen behavior, hidden address bar, overscan, screen-saver timing, and the measured black/white values.
+
+**Acceptance.** With the TV page open, one tap on *Calibrate black + white with the TV page* produces a stored black floor and white gains with no external video; the remote page shows the TV page's size and full-screen state; if the page is closed, the button explains how to open it.
+
+### 14.5 Guided setup flow on the remote page (P1)
+A single ordered flow with validation, replacing the scattered buttons: 1 *Placement* (TV fills 55-75 % of the frame width, phone level via accelerometer, TV not cropped) → 2 *Exposure* (zebra < 1 % of the picture, then lock exposure and color) → 3 *Detect TV* and fine-tune → 4 *Black* (pattern: black, room lights as normally used) → 5 *White* (pattern: white) → 6 *Mode* (shows A/B on a sample scene) → 7 *Verify* (corner LEDs and a chase). Each step shows pass/fail, can be repeated, and the finished state is stored per profile (14.6). The phone shows a one-line "setup in progress on the remote page" screen so nobody taps it by accident.
+
+### 14.6 Calibration profiles: lamps on / lamps off (P1)
+**Why.** Yellow room lamps changed what the camera sees and made blacks read blue; the right calibration depends on the lighting.
+
+**Design.**
+- **Profile** = black floor (global and per zone), white gains, per-zone gains (14.8), selected mode, brightness/saturation/warmth, exposure settings (EV, lock state and, where `MANUAL_SENSOR` is available, exposure time and ISO), and a name. Geometry stays global (per placement).
+- **Switching:** manual from either UI; optional automatic switching. Primary trigger: brightness of the *background* region (outside the TV) with exposure locked, since a lamp switching on is a step change there (hysteresis, 3 s hold). Secondary: the phone's light sensor (`TYPE_LIGHT`), unreliable when the phone is mounted screen-to-wall.
+- **Re-lock on switch:** when exact manual exposure cannot be restored, unlock AE/AWB for ~1 s, let it converge, relock, then apply the stored calibrations.
+- **Creation:** *Duplicate current as…* then rerun black/white (14.5) under the new lighting.
+
+**Acceptance.** Turn the lamps on/off and the profile follows within 5 s with correct blacks in both states.
+
+### 14.7 Letterbox and pillarbox detection (P2)
+**Why.** Widescreen films show black bars; with fixed zones the top and bottom LEDs sample black while the picture edge is further inside.
+
+**Reference *(researched)*:** Hyperion's detector counts a pixel as non-black when any channel exceeds a percentage of 255 (a user-posted default-style config uses a threshold of 0.16) and has frame-count settings (posted values: `borderFrameCnt` 50, `maxInconsistentCnt` 10, `unknownFrameCnt` 600). The sources found did not document exactly what each counter does, and forum users report the threshold needing tuning per setup, so the hold times below are our own design informed by those values.
+
+**Design.**
+- Evaluate rows (top/bottom) and columns (left/right) *inside the picture quad* using the existing sample grid. A row is "black" when its trimmed-mean luma is below `max(0.16·255, blackFloor + margin)`; scan inward from each edge up to 30 % of the dimension.
+- *(design)* Require the same border for ≥ 50 consecutive frames (~1.7 s at 30 fps) to adopt it; drop it after 10 inconsistent frames; recheck on scene cuts.
+- Apply by shrinking the picture rectangle used by `ZoneMapper` (per-side insets); animate changes over 300 ms. Optional snap to common ratios (2.39:1, 2.35:1, 1.85:1 on a 16:9 panel: bars of ≈ 12.8 %, 12 %, 3 % each).
+- Failure is benign: a dark scene mistaken for bars just samples darker, uniform pixels.
+- Settings: on/off, sensitivity (threshold), hold time; per-mode default (on in Cinema, off in Vivid).
+
+**Acceptance.** A 2.39:1 film: top and bottom LEDs track the picture edge within 3 s of the bars appearing; no hunting on dark scenes.
+
+### 14.8 Per-zone flat-field calibration (P2)
+**Why.** Corners and edges differ in brightness and tint because of lens shading, the TV's viewing angle and backlight bleed.
+
+**Model *(researched: flat-field correction)*:** `corrected = (raw - offset_k) × gain_k` per zone `k` (per channel), where the offset comes from a dark reference and the gain from a uniform bright reference; recalibrate if the camera, lighting or optics change. Color-channel specifics (separate gain maps per channel for color shading) are standard practice but were not confirmed in the sources found; verify on the reference setup.
+
+**Design.**
+- `offset_k` from the black pattern (14.4) with room lights as used; `white_k` from the white pattern; `gain_k = ref / (white_k - offset_k)` with `ref` the median of all zones, clamped to 0.5-2.0 and smoothed across neighbors (3-tap median) to suppress noise.
+- Stored per profile (14.6) per LED zone (not per pixel), so it survives re-anchoring (14.3).
+- Replaces the global white gains in modes that use white calibration; Basic stays global.
+- UI: *Calibrate zones* in guided setup; a bar chart of per-zone gains (diagnostic) on the remote page.
+
+**Acceptance.** With a white pattern all 267 zones read within ±5 % after correction; a black pattern shows no zone brighter than 2 % in any channel.
+
+### 14.9 Dominant-color weighting (P2)
+**Why.** Natural scenes with a bright highlight against a muted background are washed out by a plain average.
+
+**Reference *(researched)*:** an open-source ambilight extracts a perceptual dominant color in the Oklab color space, gates updates on a frame-difference check and smooths the result; Philips patents describe real-time dominant-color extraction from subsampled video *(researched: patent listings only; no algorithm details used)*. A simple average is cheapest; histogram or clustering methods give more vivid results at more cost *(general knowledge, not from the sources)*.
+
+**Design.**
+- Raise the per-LED samples from 3×3 to 4×4 (16); still ~4 k samples per frame.
+- **Trimmed mean** (drop the brightest and darkest 2 of 16) as the new default for Natural/Cinema.
+- **Dominant mode:** convert samples to Oklab, find two clusters (k = 2) by a few Lloyd iterations, weight each cluster by `count × (0.5 + chroma)`, output `0.7·dominant + 0.3·mean`.
+- Add as test variants **G** (trimmed mean) and **H** (dominant) first and promote the winner into the modes after A/B comparison on the TV.
+
+**Acceptance.** Forest and sky scenes keep their hue (no maroon/cyan drift) in A/B tests against Basic; processing time stays < 3 ms per frame.
+
+### 14.10 Diagnostics export (P2)
+*Share diagnostics* on the phone (Android share sheet) and `GET /diagnostics?k=` on the remote page: device model and Android version, `CameraInfoDump`, configuration JSON (remote key and Wi-Fi details removed), the last 300 log lines and a short performance summary (fps, frame age, send time). Removes the need for adb to report a problem.
+
+### 14.11 CI build of the APK on GitHub (P2)
+- Workflow `.github/workflows/build.yml` on push and pull request: `actions/checkout@v4`, `actions/setup-java@v4` (Temurin 17, `cache: gradle`), `chmod +x gradlew`, `./gradlew testDebugUnitTest assembleDebug`, then `actions/upload-artifact@v4` for `app/build/outputs/apk/debug/app-debug.apk` with a short retention. *(researched: common workflow shape; older examples use deprecated action versions)*
+- **Signing:** debug APKs are signed with the machine's debug keystore. If CI and local builds use different keys, Android will refuse to update one over the other. Pick one signing source (a project keystore in encrypted secrets, used for CI and local builds) before sharing builds. Release builds always need an own keystore stored as secrets.
+- The repository is private, so artifacts need a GitHub login; for quick installs without a cable a helper script that serves the APK on the LAN (as used during development) is also kept in `tools/`.
+- Test results are published in the job summary.
+
+### 14.12 LED strip simulator on the remote page (P3)
+Add the current per-LED output (267 × 3 bytes, base64, ~5 Hz) to `/state` or a `/leds` endpoint and draw the LEDs as dots around the TV box. It lets a developer check the pipeline without looking at the TV and makes remote debugging of corner tints possible.
+
+### 14.13 Control API for Home Assistant and automations (P3)
+- Document the existing `POST /cmd` actions (lights, mode, brightness, profile, detect) as a stable API behind the key; Home Assistant can call it with `rest_command`.
+- WLED side: Home Assistant's WLED integration exposes presets and palettes for WLED 0.14+ *(researched)*; WLED's docs advise against MQTT for Home Assistant and no webhook control was found, so plain REST is the supported route *(researched)*.
+- **Limit (from 14.2):** Android prevents starting a camera foreground service from the background, so automations can switch lights on only while the service is already running.
+- Optional: an endpoint that returns state for HA sensors (fps, idle state, temperature).
+
+### 14.14 Thermal management (P3)
+Subscribe to the thermal status (`PowerManager`, API 29+; headroom where available). Policy: *Moderate* → drop the camera to 30 fps, preview to 5 fps, zebra off; *Severe* → warn on both UIs and enter idle; log temperature in the diagnostics. Useful on a budget phone running a camera continuously.
+
+### 14.15 Device profiles, the second phone, and external cameras (P3)
+- **Device profile** from the *Camera info* dump: hardware level (LEGACY/LIMITED/FULL), AE/AWB lock availability, frame-rate ranges, zoom range, timestamp source. Disable or warn about features that depend on missing capabilities (profile auto-restore, per-zone calibration quality, 60 fps) and pre-select sensible defaults (e.g. 30 fps).
+- **Second phone: Tecno Spark 6** *(researched: GSMArena)*: Helio G70, 4 GB RAM, Android 10, 16 MP autofocus main camera with 1440p@30 video (no 60 fps listed), 2.4 GHz-only Wi-Fi (802.11 b/g/n), microUSB 2.0 with OTG. Expect 30 fps, more Wi-Fi interference on the shared 2.4 GHz band, and no 5 GHz option. Its real Camera2 capabilities are unknown until read.
+- **External USB camera (research item):** Android's Camera2 normally does not expose USB webcams, so this needs a UVC library in the app (own decoding, OTG power draw through microUSB, extra latency) and gains manual exposure/white balance and a fixed mount near the TV. Considered only if a target phone cannot lock exposure and color; not researched further yet. A clip-on telephoto lens or moving the phone closer are simpler first steps.
+
+### 14.16 Automatic mode selection (P3)
+Optional: classify the scene (mean luma, chroma, motion, black-bar state) and switch among Basic, Natural, Cinema and Vivid with hysteresis (minimum 20 s between changes, announced in the UI). Off by default; per-mode locks so a manual choice is never overridden.
 
 ---
 
@@ -384,26 +572,44 @@ Measure, do not assume: ship a **latency test mode** (see 11).
 
 | Item | Value | Implications |
 |---|---|---|
-| LEDs | 300 × WS2812 (5 V), fewer used on the TV | One frame = 300 × 24 bits × ~1.25 µs ≈ 9 ms + reset, so max ~100 fps; fine for 60 fps. Unused LEDs are sent black. |
-| Controller | Gledopto GL-C-010-WL (ESP32, WLED) | ESP32 handles DDP/UDP at 60 fps comfortably. 2.4 GHz Wi-Fi only; no Ethernet, so signal quality matters (check RSSI, disable Wi-Fi sleep in WLED). |
-| Power | 5 V | Set the WLED **max current (mA) limit** and a brightness cap; 300 LEDs at full white can draw up to ~18 A. Size the supply accordingly, with power injection if needed. Verify the data-line level suits your 5 V WS2812 wiring. |
-| Phone | Xiaomi Redmi Note 13 | Device-specific risks: camera HAL latency, whether 60 fps / manual exposure / manual white balance are exposed through Camera2, and aggressive background-app killing in MIUI/HyperOS. Mitigations: capability dump in M1, fallback to AE/AWB lock at 30 fps, onboarding step to set battery to "No restrictions", enable autostart, lock the app in recents. |
+| LEDs | WS2812 (5 V); WLED is configured for **267** LEDs, the user's strip is 300; ~267 used on the TV | One frame ≈ 267 × 24 × 1.25 µs ≈ 8 ms; the LED bus is not the bottleneck. Unused LEDs are sent black. |
+| Controller | Gledopto GL-C-010-WL (ESP32, 240 MHz) running WLED 0.15.4 "SoundReactive", AudioReactive disabled, Wi-Fi sleep off, RSSI about -57..-60 dBm, WiFi 2.4 GHz only | Sustained UDP streaming above ~15-30 packets/s caused ~16-20 % ping loss and spikes up to ~300 ms even from a PC. Output is capped at 30 packets/s, unchanged frames skipped. |
+| WLED realtime gamma | `light.gc.col = 2.8` but `if.live.no-gc = true` | WLED does **not** gamma-correct DDP frames. The app reads this and sends linear values; changing WLED's gamma is unnecessary and is not offered when `no-gc` is true. |
+| Power | 5 V, WLED current limit 3100 mA | The limit protects the supply; detection and test flashes use a moderate level. |
+| Camera phone | Xiaomi **Redmi Note 13 Pro** (model 23117RA68G), landscape on a shelf ≈ 10 ft from the TV, screen toward the wall | MIUI/HyperOS background restrictions (14.2); no USB access once mounted, so the remote page is the control surface. |
+| Second phone | Tecno Spark 6 (see 14.15) | Candidate dedicated camera phone. |
+| TV | Google TV with a browser | The TV's own browser can show calibration patterns (14.4) and the remote page. |
+| Controller PC | Windows 11, JDK 17, Android SDK on D:, adb | Build and install via USB or (fallback) a temporary LAN file server. |
 
 The phone model does not change the architecture; it determines the achievable latency floor and which exposure controls are available.
 
 ---
 
-## 14. Sources
+## 16. Sources
 
 - Ambient Light TV listing: https://chrome-stats.com/d/com.ambientlight.tv
 - Hyperion Android Reborn wiki: https://github.com/evanwhitt/hyperion-android-reborn/wiki
 - WLED UDP Realtime (protocol bytes, timeouts, limits): https://kno.wled.ge/interfaces/udp-realtime/
 - WLED DDP: https://kno.wled.ge/interfaces/ddp/
+- WLED JSON API (power, presets via `ps`, live mode): https://kno.wled.ge/interfaces/json-api/
+- WLED presets: https://kno.wled.ge/features/presets/
+- WLED home automation and Home Assistant integration: https://kno.wled.ge/advanced/home-automation and https://www.home-assistant.io/integrations/wled
 - HyperHDR releases (smoothing, LUT calibration): https://github.com/awawa-dev/HyperHDR/releases
+- Hyperion black-border settings as reported by users (threshold, frame counts): https://community.home-assistant.io/t/hyperion-black-bar-question/30042 and https://discourse.osmc.tv/t/osmc-and-hyperion/23293/343
+- Automatic letter/pillarbox detection research paper: https://www.scitepress.org/Papers/2014/50642/50642.pdf
+- Open-source ambilight with Oklab dominant color, change gate and smoothing: https://git.pvv.ntnu.no/adriangl/ambiligth
 - WLED forum, APA102 above 30 fps: https://wled.discourse.group/t/apa102-max-30fps-in-live-mode/5121
 - WLED forum, latency discussion: https://wled.discourse.group/t/x-lights-latency/3632
 - Android Camera2 package docs (YUV/JFIF, pipelining): https://developer.android.com/reference/android/hardware/camera2/package-summary
 - CameraX analysis guide: https://developer.android.com/training/camerax/analyze
-- Camera-based backlight reviews (green / skin tone / washout issues): https://www.notebookcheck.net/Govee-Envisual-T2-The-camera-based-Philips-Ambilight-alternative-in-a-hands-on.681256.0.html
+- Android foreground service types (camera type, permissions, while-in-use rule): https://developer.android.com/develop/background-work/services/fgs/service-types
+- Android restrictions on starting foreground services from the background (exemptions, while-in-use creation rule): https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start
+- Xiaomi background-process restrictions (autostart, battery, recents lock): https://dontkillmyapp.com/xiaomi and https://appuals.com/xiaomi-phone-closes-background-apps/
+- Phase correlation and sub-pixel registration: https://strathprints.strath.ac.uk/29259/ and https://bmva-archive.org.uk/bmvc/2008/papers/292.pdf
+- Flat-field correction (offset and gain per pixel): https://documentation.euresys.com/Products/COAXLINK/COAXLINK_10_3/Content/03_Using_Coaxlink/functional-guide/flat-field-correction/what-is-ffc.htm and https://docs.adaptive-vision.com/studio/filters/ImageCombinators/CorrectFlatField.html
+- GitHub Actions for Android builds (workflow shape; check current action versions): https://proandroiddev.com/android-ci-cd-pipeline-with-github-actions-demystifying-github-actions-83258e76a18f
+- Tecno Spark 6 specifications: https://www.gsmarena.com/tecno_spark_6-10471.php
+- Camera-based backlight reviews (green / skin tone / washout issues, blank-screen auto off): https://www.notebookcheck.net/Govee-Envisual-T2-The-camera-based-Philips-Ambilight-alternative-in-a-hands-on.681256.0.html and https://us.govee.com/products/govee-dreamview-t1-tv-backlight
+- Nanoleaf 4D review (calibration, TV power LED false detections): https://www.macrumors.com/review/nanoleaf-4d-camera-and-light-strip/
 
-Note: items marked "anecdotal" come from forum posts, and items about exposure/flicker/Wi-Fi lock APIs are from general Android knowledge and should be verified on target devices.
+Note: items marked "anecdotal" come from forum posts; statements marked *(design)* are our own proposals; and items about exposure/flicker/Wi-Fi lock APIs are from general Android knowledge and should be verified on target devices.
